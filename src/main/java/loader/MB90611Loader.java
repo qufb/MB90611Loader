@@ -24,7 +24,9 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Formatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -32,6 +34,7 @@ import java.util.regex.Pattern;
 import docking.widgets.OptionDialog;
 import docking.widgets.filechooser.GhidraFileChooser;
 import ghidra.app.cmd.data.CreateArrayCmd;
+import ghidra.app.cmd.data.CreateDataCmd;
 import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.util.Option;
 import ghidra.app.util.bin.BinaryReader;
@@ -44,6 +47,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.data.ByteDataType;
 import ghidra.program.model.data.DWordDataType;
 import ghidra.program.model.data.DataType;
+import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.QWordDataType;
 import ghidra.program.model.data.WordDataType;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
@@ -197,18 +201,53 @@ public class MB90611Loader extends AbstractLibrarySupportLoader {
 		createNamedData(fpa, program, 0x0000BFL, "ICR15", ByteDataType.dataType, log);
 
 		// BIOS ROM entry point
-        long biosEntryOffset = reader.readUnsignedInt(0x0FFFDC) & 0x00FFFFFF;
-		monitor.setMessage(String.format("BIOS ROM entry @ %d", biosEntryOffset));
-
-		Address biosEntry = fpa.toAddr(biosEntryOffset);
-		try {
-			DisassembleCommand cmd = new DisassembleCommand(biosEntry, null, true);
-			cmd.applyTo(program, TaskMonitor.DUMMY);
-			fpa.createFunction(biosEntry, "Reset");
-			fpa.addEntryPoint(biosEntry);
-		} catch (Exception e) {
-			log.appendException(e);
+        for (int i = 0x60; i < 0x100; i += 4) {
+			new CreateDataCmd(fpa.toAddr(0xFFFF00 | i), new PointerDataType()).applyTo(program);
 		}
+		Map <Long, String> mappings = new HashMap<>();
+		mappings.put(0x0FFFDCL, "Reset");
+		mappings.put(0x0FFFD8L, "INT9");
+		mappings.put(0x0FFFD4L, "Exception");
+		mappings.put(0x0FFFD0L, "EXT_INT0");
+		mappings.put(0x0FFFC8L, "EXT_INT1");
+		mappings.put(0x0FFFC0L, "EXT_INT2");
+		mappings.put(0x0FFFB8L, "EXT_INT3");
+		mappings.put(0x0FFFB0L, "EXT_INT4");
+		mappings.put(0x0FFFA8L, "EXT_INT5");
+		mappings.put(0x0FFFA0L, "EXT_INT6");
+		mappings.put(0x0FFF9CL, "UART0_TX");
+		mappings.put(0x0FFF98L, "EXT_INT7");
+		mappings.put(0x0FFF94L, "UART1_TX");
+		mappings.put(0x0FFF90L, "PPG0");
+		mappings.put(0x0FFF8CL, "PPG1");
+		mappings.put(0x0FFF88L, "RELOAD_TIMER0");
+		mappings.put(0x0FFF84L, "RELOAD_TIMER1");
+		mappings.put(0x0FFF80L, "ADC_MEASURE");
+		mappings.put(0x0FFF78L, "UART2_TX");
+		mappings.put(0x0FFF74L, "TIMER_INTERVAL_INT");
+		mappings.put(0x0FFF70L, "UART2_RX");
+		mappings.put(0x0FFF68L, "UART1_RX");
+		mappings.put(0x0FFF60L, "UART0_RX");
+        //mappings.put(0x0FFF54L, "DELAYED_INT");
+		mappings.forEach((offset, name) -> {
+			try {
+                Address entry = fpa.toAddr(0xF00000L | offset);
+                fpa.createLabel(entry, name, true);
+
+                long vecOffset = reader.readUnsignedInt(offset) & 0x00FFFFFF;
+                if (vecOffset != 0x00FFFFFF) {
+                    Address vec = fpa.toAddr(vecOffset);
+                    DisassembleCommand cmd = new DisassembleCommand(vec, null, true);
+                    cmd.applyTo(program, TaskMonitor.DUMMY);
+                    fpa.createFunction(vec, name);
+                    if (name.equals("Reset")) {
+                        fpa.addEntryPoint(vec);
+                    }
+                }
+			} catch (Exception e) {
+				log.appendException(e);
+			}
+		});
 
 		monitor.setMessage(String.format("%s : Loading done", getName()));
 	}
