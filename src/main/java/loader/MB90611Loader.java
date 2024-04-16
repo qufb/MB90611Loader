@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -51,6 +52,9 @@ import ghidra.program.model.data.PointerDataType;
 import ghidra.program.model.data.QWordDataType;
 import ghidra.program.model.data.WordDataType;
 import ghidra.program.model.lang.LanguageCompilerSpecPair;
+import ghidra.program.model.lang.Register;
+import ghidra.program.model.lang.RegisterValue;
+import ghidra.program.model.listing.ContextChangeException;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
@@ -242,6 +246,11 @@ public class MB90611Loader extends AbstractLibrarySupportLoader {
                     fpa.createFunction(vec, name);
                     if (name.equals("Reset")) {
                         fpa.addEntryPoint(vec);
+                        setRegisterValue(program, "PCB", vec, 0xFFL, log);
+                        setRegisterValue(program, "DTB", vec, 0L, log);
+                        setRegisterValue(program, "USB", vec, 0L, log);
+                        setRegisterValue(program, "SSB", vec, 0L, log);
+                        setRegisterValue(program, "ADB", vec, 0L, log);
                     }
                 }
 			} catch (Exception e) {
@@ -250,6 +259,24 @@ public class MB90611Loader extends AbstractLibrarySupportLoader {
 		});
 
 		monitor.setMessage(String.format("%s : Loading done", getName()));
+	}
+
+	private void setRegisterValue(Program program, String name, Address start, long value, MessageLog log) {
+		setRegisterValue(program, name, start, start, value, log);
+	}
+
+	private void setRegisterValue(Program program, String name, Address start, Address end, long value, MessageLog log) {
+		int transId = program.startTransaction(String.format("Apply %s register value", name));
+		RegisterValue regVal = new RegisterValue(program.getRegister(name), BigInteger.valueOf(value));
+
+		try {
+			program.getProgramContext().setRegisterValue(start, end, regVal);
+		} catch (ContextChangeException e) {
+			log.appendException(e);
+		}
+		finally {
+			program.endTransaction(transId, true);
+		}
 	}
 
 	private void createSegment(FlatProgramAPI fpa,
